@@ -11,6 +11,8 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
+import msvcrt
+
 # Import utils
 try:
     from utils import terminal_file_selector, load_file, clear_screen
@@ -18,11 +20,57 @@ except ImportError:
     print("Error: utils.py not found. Please ensure it is in the same directory.")
     sys.exit(1)
 
+# --- Colors ---
+class Colors:
+    HEADER = '\033[95m'
+    BLUE = '\033[94m'
+    CYAN = '\033[96m'
+    GREEN = '\033[92m'
+    WARNING = '\033[93m'
+    FAIL = '\033[91m'
+    ENDC = '\033[0m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
+
 # --- Constants & Config ---
 CONFIG_FILE = os.path.join("Config", "settings.json")
 INPUT_DIR = "Input"
+TEMP_DIR = "Temp"
 OUTPUT_RANGES_DIR = os.path.join("Output", "Ranges")
 OUTPUT_FINAL_DIR = os.path.join("Output", "Final")
+
+# Enable VT100 for Windows 10/11 if needed (os.system('color') usually does the trick)
+os.system('color')
+
+def print_header(title="IP Range Generator"):
+    clear_screen()
+    print(f"{Colors.HEADER}={'='*60}{Colors.ENDC}")
+    print(f"{Colors.HEADER}{title.center(60)}{Colors.ENDC}")
+    print(f"{Colors.HEADER}={'='*60}{Colors.ENDC}")
+    print()
+
+class ScanState:
+    def __init__(self):
+        self.paused = False
+        self.stopped = False
+        self.save_progress = False
+
+    def toggle_pause(self):
+        self.paused = not self.paused
+        if self.paused:
+            print(f"\n{Colors.WARNING} [PAUSED] Press 'P' to resume...{Colors.ENDC}")
+        else:
+            print(f"\n{Colors.GREEN} [RESUMED] Continuing scan...{Colors.ENDC}")
+
+    def stop_save(self):
+        self.stopped = True
+        self.save_progress = True
+        print(f"\n{Colors.WARNING} [STOPPING] Saving progress and exiting...{Colors.ENDC}")
+
+    def stop_no_save(self):
+        self.stopped = True
+        self.save_progress = False
+        print(f"\n{Colors.FAIL} [STOPPING] Exiting without saving remaining queue...{Colors.ENDC}")
 
 class ConfigManager:
     def __init__(self):
@@ -133,74 +181,176 @@ class IPTester:
 
     def scan_ips(self, ips, settings, output_dir=OUTPUT_FINAL_DIR):
         """
-        Scans a list of IPs and returns/saves results.
+        Scans a list of IPs with Real-time saving, Pause, and Stop functionality.
         """
-        print(f"\nStarting Scan on {len(ips)} IPs...")
-        print(f"Settings: {settings}")
+        print(f"\n{Colors.HEADER}Starting Scan on {len(ips)} IPs...{Colors.ENDC}")
+        print(f"{Colors.CYAN}Controls: [P]ause | [S]top & Save | [Q]uit (No Save){Colors.ENDC}")
         
-        results = []
         max_threads = settings.get('threads', 100)
+        output_format = settings.get('output_format', 'txt')  # Force txt/csv for real-time mostly
+
+        # Setup Output File
+        ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        filename = f"Scan_{ts}.{output_format}"
+        filepath = os.path.join(output_dir, filename)
         
-        # Helper to print progress
-        lock = threading.Lock()
+        # If resuming (not implemented fully yet, but structure allows it), one would load existing here.
+        
+        # Initialize State
+        state = ScanState()
+        
+        # Start Input Listener Thread
+        def input_listener():
+            while not state.stopped:
+                if msvcrt.kbhit():
+                    try:
+                        key = msvcrt.getch().lower()
+                        if key == b'p': state.toggle_pause()
+                        elif key == b's': state.stop_save()
+                        elif key == b'q': state.stop_no_save()
+                    except: pass
+                time.sleep(0.1)
+                
+        listener_thread = threading.Thread(target=input_listener, daemon=True)
+        listener_thread.start()
+
+        results = []
+        # Real-time file handle
+        f_handle = open(filepath, 'a', newline='') 
+        csv_writer = None
+        if output_format == 'csv':
+            csv_writer = csv.DictWriter(f_handle, fieldnames=['ip', 'latency_ms', 'status'])
+            csv_writer.writeheader()
+        elif output_format == 'json':
+            # JSON is bad for streaming, we will write a temp list and dump at end, 
+            # OR write line-delimited JSON (NDJSON). For compat, let's stick to standard JSON 
+            # but we can't write it real-time easily without invalidating syntax.
+            # fallback: We will buffer results and write at the very end for JSON, 
+            # OR write to a .tmp file and convert. 
+            # Let's write text to file line by line as backup, and dump JSON at end?
+            # Let's write text to file line by line as backup, and dump JSON at end?
+            print(f"{Colors.CYAN} [i] JSON format selected. File will be updated every 100 successful IPs.{Colors.ENDC}")
+            f_handle.close() # Close for now
+            f_handle = None
+
+        # Thread Pool
+        # We need to manage the pool manually to allow pausing.
+        # Executors don't pause easily. We will use a Semaphore or simply chunks.
+        
+        # To support pause/stop effectively with threads, we queue items and threads pick them up.
+        # But `map` is blocking. `submit` gives futures.
+        
         completed = 0
+        success_count = 0
         total = len(ips)
         
+        # We'll use a queue or just iterate and submit only when not paused.
+        # Actually, simpler: Use Executor but check state inside the task?
+        # If paused, task sleeps? No, that blocks threads.
+        # Better: The main loop submits tasks. If paused, main loop waits.
+        
+        # However, checking pause inside task is easier for immediate pause effect, 
+        # but holding a thread while paused is bad if we pause for hours (resource usage).
+        # For a simple script, sleeping in task is fine.
+        
+        lock = threading.Lock()
+        
         def task(ip):
-            nonlocal completed
+            # Check pause/stop
+            while state.paused:
+                time.sleep(0.5)
+                if state.stopped: return None
+            if state.stopped: return None
+            
             ping = self.run_test(ip, settings)
             status = "FAIL"
             if ping is not None and ping <= settings.get('max_ping', 1000):
                 status = "SUCCESS"
             
-            with lock:
-                completed += 1
-                sys.stdout.write(f"\r[{completed}/{total}] Scanning... Success: {sum(1 for r in results if r['status'] == 'SUCCESS')}")
-                sys.stdout.flush()
-                
-            entry = {'ip': ip, 'latency_ms': ping if ping is not None else 0, 'status': status}
-            
-            # Logic: If failure, only keep if save_failed is true
-            if status == 'SUCCESS' or settings.get('save_failed', False):
-                 results.append(entry)
+            return {'ip': ip, 'latency_ms': ping if ping is not None else 0, 'status': status}
 
+        futures = []
         with ThreadPoolExecutor(max_workers=max_threads) as executor:
-            executor.map(task, ips)
+            # We submit all? If we submit all, we can't stop submission easily.
+            # So we submit in chunks or just handle "stopped" in task (which returns None).
             
-        print("\nScan Complete.")
-        
-        # Save Results
-        if results:
-            self.save_results(results, output_dir, settings)
-        else:
-            print("No successful IPs found (and 'save_failed' is off).")
+            # Submitting 1 million tasks taking memory? Yes.
+            # Determine chunk size?
             
-    def save_results(self, results, output_dir, settings):
-        ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        success_count = sum(1 for r in results if r['status'] == 'SUCCESS')
-        filename = f"Scan_{ts}_{success_count}IPs.{settings.get('output_format', 'json')}"
-        filepath = os.path.join(output_dir, filename)
-        
-        # Sort
-        results.sort(key=lambda x: (x['status'] != 'SUCCESS', x['latency_ms']))
-        
-        fmt = settings.get('output_format', 'json')
-        
-        if fmt == 'json':
-            out = {"settings": settings, "results": results}
-            with open(filepath, 'w') as f:
-                json.dump(out, f, indent=2)
-        elif fmt == 'csv':
-             with open(filepath, 'w', newline='') as f:
-                writer = csv.DictWriter(f, fieldnames=['ip', 'latency_ms', 'status'])
-                writer.writeheader()
-                writer.writerows(results)
-        elif fmt == 'txt':
-            with open(filepath, 'w') as f:
-                for r in results:
-                    f.write(f"{r['ip']} | {r['latency_ms']}ms | {r['status']}\n")
+            # Let's iterate and submit
+            for i, ip in enumerate(ips):
+                if state.stopped:
+                    break
                     
-        print(f"Saved results to: {filepath}")
+                while state.paused:
+                    time.sleep(0.2)
+                    
+                # To avoid flooding memory with millions of pending tasks, 
+                # we can limit pending tasks? 
+                # For now, just submit. Python's overhead for 65k IPs is fine. 
+                # For huge lists, we might want to check queue size, but let's keep it simple.
+                future = executor.submit(task, ip)
+                futures.append(future)
+                
+                # Check status periodically
+                # (This loop runs fast, so we mostly just fill the queue)
+                # To make the loop responsive to 'Pause' blocking submission:
+                # The 'while state.paused' above handles it.
+                
+            # Process results as they complete
+            # We want to write results AS they finish.
+            # `as_completed` is good for this.
+            
+            from concurrent.futures import as_completed
+            
+            for future in as_completed(futures):
+                # If we stopped, we might still have pending tasks completing.
+                # We can ignore them or process them. 
+                # If "Stop & Save", we process what we have.
+                res = future.result()
+                if not res: continue # Was stopped/cancelled
+                
+                with lock:
+                    completed += 1
+                    if res['status'] == 'SUCCESS':
+                        success_count += 1
+                        
+                    # UI Update
+                    sys.stdout.write(f"\r[{completed}/{total}] {Colors.BLUE}Scanning...{Colors.ENDC} {Colors.GREEN}Success: {success_count}{Colors.ENDC}")
+                    sys.stdout.flush()
+                    
+                    # Save Real-time
+                    if res['status'] == 'SUCCESS' or settings.get('save_failed', False):
+                        if f_handle:
+                            if output_format == 'csv':
+                                csv_writer.writerow(res)
+                            elif output_format == 'txt':
+                                f_handle.write(f"{res['ip']} | {res['latency_ms']}ms | {res['status']}\n")
+                            f_handle.flush() # Ensure it hits disk
+                        if output_format == 'json':
+                            results.append(res)
+                            # Periodic JSON Save (Every 100 successes or so)
+                            if len(results) % 100 == 0:
+                                # Write to a temp file then rename? Or just overwrite.
+                                # Overwriting is safer than appending to JSON.
+                                try:
+                                    out = {"settings": settings, "results": results}
+                                    with open(filepath, 'w') as f:
+                                        json.dump(out, f, indent=2)
+                                except: pass
+
+        print(f"\n{Colors.BOLD}Scan Finished or Stopped.{Colors.ENDC}")
+        if f_handle:
+            f_handle.close()
+            
+        # Final JSON dump if needed (To ensure everything is saved)
+        if output_format == 'json' and results:
+            print("Saving Final JSON report...")
+            out = {"settings": settings, "results": results}
+            with open(filepath, 'w') as f: # Overwrite/Create
+                json.dump(out, f, indent=2)
+                
+        print(f"{Colors.GREEN}Results saved to: {filepath}{Colors.ENDC}")
 
 class IPGenerator:
     def __init__(self, tester):
@@ -249,8 +399,13 @@ class IPGenerator:
         Returns list of generated file paths.
         """
         generated_files = []
+        
+        # Ensure dir exists
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+
         for cidr in cidrs:
-            print(f"Generating IPs for {cidr}...")
+            print(f"Generating IPs for {Colors.BOLD}{cidr}{Colors.ENDC}...")
             
             # WARNING: IPv6 /32 expansion is impossible (billions of IPs).
             # We must check size before exploding.
@@ -263,7 +418,7 @@ class IPGenerator:
                     # We'll skip saving a file for IPv6 ranges or limit it.
                     # Let's generate a small sample (e.g. 1000 IPs) for testing?
                     # Or just notify.
-                    print("     IPv6 expansion is disabled to prevent disk overflow.")
+                    print(f"     {Colors.WARNING}IPv6 expansion is disabled to prevent disk overflow.{Colors.ENDC}")
                     continue
             except:
                 pass
@@ -298,7 +453,12 @@ class IPGenerator:
 
 def get_user_settings_override(defaults):
     """Simple prompt to override basic settings for a run."""
-    print(f"\nCurrent Settings: {defaults}")
+    print_header("Scan Settings")
+    print(f"{Colors.HEADER}Current Settings:{Colors.ENDC}")
+    for k, v in defaults.items():
+        print(f"  {k:<15}: {v}")
+    print()
+    
     if input("Change settings for this run? (y/N): ").lower() != 'y':
         return defaults.copy()
         
@@ -322,22 +482,26 @@ def get_user_settings_override(defaults):
     return new_settings
 
 def menu_scan_ip_ranges(cfg, tester, generator):
-    print("\n--- Scan IP Ranges ---")
+    print_header("Scan IP Ranges")
     
     # 1. Select Source
-    print("1. Use Templates (CloudFlare/Fastly)")
-    print("2. Select File with Ranges")
-    src = input("Select Source (1/2): ").strip()
+    print(f"{Colors.BOLD}Select Source:{Colors.ENDC}")
+    print("  1. Use Templates (CloudFlare/Fastly)")
+    print("  2. Select File with Ranges")
+    print("  3. Back")
+    src = input("\nSelect (1-3): ").strip()
+    
+    if src == '3': return
     
     cidrs_to_scan = [] # List of CIDR strings
     
     if src == '1':
         templates = cfg.get_templates()
         providers = list(templates.keys())
-        print("Providers:")
+        print(f"\n{Colors.CYAN}Available Providers:{Colors.ENDC}")
         for i, p in enumerate(providers):
-            print(f"{i+1}. {p}")
-        print(f"{len(providers)+1}. All")
+            print(f"  {i+1}. {p}")
+        print(f"  {len(providers)+1}. All")
         
         selected_providers = []
         try:
@@ -395,10 +559,10 @@ def menu_scan_ip_ranges(cfg, tester, generator):
         if not sample: continue
         res = tester.run_test(sample, settings)
         if res:
-            print(f"   [+] {cidr} seems UP ({res}ms)")
+            print(f"   [{Colors.GREEN}+{Colors.ENDC}] {cidr} seems UP ({res}ms)")
             successful_cidrs.append(cidr)
         else:
-            print(f"   [-] {cidr} seems DOWN (Sample {sample} failed)")
+            print(f"   [{Colors.FAIL}-{Colors.ENDC}] {cidr} seems DOWN (Sample {sample} failed)")
             
     if not successful_cidrs:
         print("No working ranges found.")
@@ -427,10 +591,13 @@ def menu_scan_ip_ranges(cfg, tester, generator):
             tester.scan_ips(all_ips, settings)
 
 def menu_scan_ips(cfg, tester):
-    print("\n--- Scan IPs (Direct) ---")
-    print("1. Terminal Input")
-    print("2. File Input")
-    src = input("Select: ").strip()
+    print_header("Scan IPs (Direct)")
+    print("  1. Terminal Input")
+    print("  2. File Input")
+    print("  3. Back")
+    src = input("\nSelect (1-3): ").strip()
+    
+    if src == '3': return
     
     ips_to_scan = []
     
@@ -453,14 +620,18 @@ def menu_scan_ips(cfg, tester):
 
 def menu_settings(cfg):
     while True:
-        clear_screen()
-        print("--- Settings ---")
+        print_header("Global Settings")
         defaults = cfg.get_defaults()
+        print(f"{Colors.BOLD}{'Key':<20} {'Value':<20}{Colors.ENDC}")
+        print("-" * 40)
         for k, v in defaults.items():
-            print(f"{k}: {v}")
+            print(f"{k:<20} {v}")
             
-        print("\nCommands: [edit <key> <val>] | [back]")
-        cmd = input("> ").strip().split()
+        print(f"\n{Colors.CYAN}Commands:{Colors.ENDC}")
+        print("  edit <key> <val>   (e.g., edit threads 200)")
+        print("  back               (Return to Main Menu)")
+        
+        cmd = input("\n> ").strip().split()
         if not cmd: continue
         
         if cmd[0] == 'back': break
@@ -489,12 +660,11 @@ def main():
     generator = IPGenerator(tester)
     
     while True:
-        clear_screen()
-        print("=== IP Range Generator & Tester ===")
-        print("1. Scan IP Ranges (Template/File -> Check -> Generate -> Scan)")
-        print("2. Scan IPs (Direct Scan)")
-        print("3. Settings")
-        print("4. Exit")
+        print_header("Main Menu")
+        print("  1. Scan IP Ranges (Templates / Files)")
+        print("  2. Scan IPs (Direct Input)")
+        print("  3. Settings")
+        print("  4. Exit")
         
         choice = input("\nSelect: ").strip()
         
