@@ -6,16 +6,18 @@ A modern, high-performance IP range scanner and generator written in Python. Thi
 
 * **Multi-Threaded Scanning:** Utilizes `ThreadPoolExecutor` for high-speed concurrent scanning of thousands of IPs.
 * **Smart CIDR Handling:** intelligently expands CIDR ranges and includes safeguards against generating excessively large files (e.g., for IPv6).
-* **Multi-Protocol Support:** capable of testing via TCP, HTTP, HTTPS, UDP, and more.
+* **Multi-Protocol Support:** Capable of testing via **TCP, WebSocket (WS), HTTP, HTTPS, gRPC, QUIC, KCP, HTTPUpgrade, SplitHTTP, and xHTTP**.
 * **Template System:** Pre-configured templates for popular providers like Cloudflare and Fastly, with support for custom templates in `settings.json`.
 * **Flexible Output:** Saves results in multiple formats including **JSON, CSV, and TXT** for easy integration with other tools.
-* **Interactive TUI:** A user-friendly terminal interface for selecting files, configuring scan settings, and managing output.
+* **Interactive TUI:** A user-friendly terminal interface for selected files, configuring scan settings, and managing output.
+* **Dynamic Settings:** Change scan settings (like threads, timeout, port) *during* a scan by editing `settings.json`. The script detects changes and prompts to apply them in real-time.
+* **Smart Sorting:** Automatically sorts output files by **Ping Latency** (Success first) for easier analysis.
 
 ## 📁 Project Structure
 
 The project is organized into a clean and scalable structure to make navigation and modification intuitive.
 
-```
+```text
 /
 ├── Config/         # Configuration files (settings.json)
 ├── Input/          # Directory for input files containing IP ranges

@@ -80,12 +80,43 @@ class ConfigManager:
         if not os.path.exists(CONFIG_FILE):
              # Should have been created by setup, but just in case return defaults
              return {"defaults": {}, "templates": {}}
+
         try:
             with open(CONFIG_FILE, 'r') as f:
-                return json.load(f)
+                content = f.read()
+                # Strip comments (lines starting with //) to allow user guides
+                # We also remove trailing comments if possible, but line-based is safer for now as requested.
+                # Actually, standard JSON doesn't support comments. We'll do a simple line filter.
+                clean_lines = []
+                for line in content.splitlines():
+                    if '//' in line:
+                        # Check if it's a URL (http://) or a comment
+                        # Simple heuristic: if // follows "http:" or "https:", it's likely a URL.
+                        # But simpler: split by // and take the first part, UNLESS it looks like a URL.
+                        # For this specific config file, comments are likely at end of line.
+                        # Let's use a regex or simple split.
+                        if "://" not in line:
+                             line = line.split('//')[0]
+                    clean_lines.append(line)
+                clean_content = '\n'.join(clean_lines)
+                return json.loads(clean_content)
         except Exception as e:
             print(f"Error loading config: {e}")
             return {"defaults": {}, "templates": {}}
+
+    def check_for_changes(self, current_settings):
+        """Checks if settings on disk differ from current_settings."""
+        new_config = self.load_config()
+        new_defaults = new_config.get('defaults', {})
+        
+        diff = {}
+        for k, v in new_defaults.items():
+            if k in current_settings:
+                if current_settings[k] != v:
+                    diff[k] = {"old": current_settings[k], "new": v}
+            # We could handle new keys too, but mostly we care about updates.
+        
+        return diff, new_defaults
 
     def save_config(self):
         try:
@@ -329,14 +360,137 @@ class IPTester:
                             elif output_format == 'txt':
                                 f_handle.write(f"{res['ip']} | {res['latency_ms']}ms | {res['status']}\n")
                         if output_format == 'json':
+                            # Check if we need to append current settings (if changed)
+                            # We can just rely on the 'settings' dict which is current. 
+                            # If we want to support per-IP port, we need to modify 'res'.
+                            
+                            # Simple approach: If settings have EVER been changed, we start stamping.
+                            initial_port = self.defaults.get('port', 443)
+                            current_port = settings.get('port', 443)
+                            
+                            if current_port != initial_port:
+                                res['port'] = current_port
+                            
+                            initial_proto = self.defaults.get('protocol', 'tcp')
+                            current_proto = settings.get('protocol', 'tcp')
+                            
+                            if current_proto != initial_proto:
+                                res['protocol'] = current_proto
+                            
                             results.append(res)
 
                     # Periodic Update (Flush/Dump) based on TOTAL Scanned
                     # Note: We use 'completed' count, which includes failures.
+                    
+                    # DYNAMIC SETTINGS CHECK
+                    check_interval = settings.get('settings_check_interval', 1000)
+                    if completed % check_interval == 0:
+                         # We can't easily prompt in this loop without pausing first.
+                         # But we can check, and if changed, auto-pause or set a flag.
+                         # Let's do a quick check.
+                         diff, new_defaults = self.cfg.check_for_changes(settings)
+                         if diff:
+                            # Auto-pause to ask user
+                            if not state.paused:
+                                state.paused = True
+                                print(f"\n{Colors.WARNING} [!] Settings change detected during scan! Pausing...{Colors.ENDC}")
+                                # Listener thread handles 'P', but we forced paused.
+                                # We need to handle the prompt here in the main thread?
+                                # The main thread is this loop (processing results).
+                                
+                                # Show Diff
+                                print(f"\n{Colors.HEADER}Changed Settings:{Colors.ENDC}")
+                                for k, v in diff.items():
+                                    print(f"  {k}: {Colors.fail}{v['old']}{Colors.ENDC} -> {Colors.green}{v['new']}{Colors.ENDC}")
+                                
+                                # Ask to apply
+                                # We need to clear stdin? input() works.
+                                try:
+                                    choice = input(f"\n{Colors.WARNING}Apply changes? (y/N): {Colors.ENDC}").lower()
+                                except: choice = 'n'
+                                
+                                if choice == 'y':
+                                    # Logic to handle Port/Protocol Change Backfill
+                                    old_port = settings.get('port')
+                                    old_proto = settings.get('protocol')
+                                    new_port = new_defaults.get('port')
+                                    new_proto = new_defaults.get('protocol')
+                                    
+                                    # Update Settings
+                                    settings.update(new_defaults)
+                                    print(f"{Colors.GREEN}Settings applied!{Colors.ENDC}")
+                                    
+                                    # Backfill if needed
+                                    if (new_port and new_port != old_port) or (new_proto and new_proto != old_proto):
+                                        print("Updating previous results with old settings...")
+                                        for r in results:
+                                            # Only add if not already present (preserve original scan settings)
+                                            if 'port' not in r: r['port'] = old_port
+                                            if 'protocol' not in r: r['protocol'] = old_proto
+                                            # New results will naturally use new settings (which are not in 'r' by default, 
+                                            # but the user wants them stamped if changed).
+                                            # Actually, the user said: "add a 'port': '443' on the IPs already Pinged".
+                                            # And "add a 'port': '80' on new IPs scanned".
+                                            # This implies we should stamp *every* result now?
+                                            # Or just stamp the *change*.
+                                            # Let's stamp the current (old) ones now.
+                                        
+                                        # To ensure NEW results get the NEW port, we need to modify `task`?
+                                        # The `task` uses `settings` object. Since `settings` is a dict passed by reference,
+                                        # updates here REFLECT inside `task` immediately for NEXT tasks picked up!
+                                        # BUT, for the tasks *currently running* in thread pool, they have the old settings ref? 
+                                        # Yes, they share the dict object. So they might use new settings mid-flight?
+                                        # Trivial race condition, accepted for this expected behavior.
+                                        
+                                        # However, we need to make sure `task` returns the port used?
+                                        # Currently `task` returns `{'ip':..., 'status':...}`.
+                                        # If we want to record the port/protocol used for THAT specific result, 
+                                        # we should probably return it from `task`.
+                                        # BUT refactoring `task` return signature might be too much.
+                                        # User said: "add a 'port': '80' on new IPs scanned from now on".
+                                        # If we just update `settings`, the scanner uses new port.
+                                        # The JSON output doesn't usually show port unless we add it.
+                                        # So we must Start adding it to `results`.
+                                        # Modification: We will inject port/proto into `results` list for FUTURE items in the loop below?
+                                        # No, `res` comes from `future.result()`. 
+                                        # We can inject it into `res` right here before appending to `results`.
+                                        
+                                        # We need a flag "settings_changed_so_track_port = True"
+                                        # Let's set it in state or just check if `settings.get('port') != initial_port`.
+                                        pass
+
+                                    # Update global threads if changed? 
+                                    # ThreadPoolExecutor doesn't support changing max_workers easily.
+                                    # We'd have to destroy and recreate. 
+                                    # For simplicity, we ignore thread count changes or warn "Restart required for threads".
+                                    if 'threads' in diff:
+                                        print(f"{Colors.WARNING} [!] Thread count changed. Restart scan to apply.{Colors.ENDC}")
+
+                                else:
+                                    print("Changes discarded for this run.")
+
+                                # Resume
+                                state.paused = False
+                                print(f"{Colors.GREEN}Resuming...{Colors.ENDC}")
+
+
+                    # SORT Logic for File Save
+                    # Function to sort: Success first, then latency low->high
+                    def sort_key(item):
+                        # Status: SUCCESS=0, FAIL=1 (so Success comes first)
+                        # Latency: Value or Infinity
+                        s = 0 if item['status'] == 'SUCCESS' else 1
+                        l = item['latency_ms'] if item['latency_ms'] is not None else float('inf')
+                        return (s, l)
+
                     if output_format == 'json':
                         interval = settings.get('json_update_interval', 10000)
                         if completed % interval == 0:
                             try:
+                                # Apply Sorting
+                                results.sort(key=sort_key)
+                                
+                                # Since we might have modified results with port/proto, we dump them.
                                 out = {"settings": settings, "results": results}
                                 with open(filepath, 'w') as f:
                                     json.dump(out, f, indent=2)
@@ -357,6 +511,7 @@ class IPTester:
         # Final JSON dump if needed (To ensure everything is saved)
         if output_format == 'json' and results:
             print("Saving Final JSON report...")
+            results.sort(key=lambda item: (0 if item['status'] == 'SUCCESS' else 1, item['latency_ms'] if item['latency_ms'] is not None else float('inf')))
             out = {"settings": settings, "results": results}
             with open(filepath, 'w') as f: # Overwrite/Create
                 json.dump(out, f, indent=2)
