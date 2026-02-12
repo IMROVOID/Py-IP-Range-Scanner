@@ -229,7 +229,8 @@ class IPTester:
             # OR write to a .tmp file and convert. 
             # Let's write text to file line by line as backup, and dump JSON at end?
             # Let's write text to file line by line as backup, and dump JSON at end?
-            print(f"{Colors.CYAN} [i] JSON format selected. File will be updated every 100 successful IPs.{Colors.ENDC}")
+            json_freq = settings.get('json_update_interval', 10000)
+            print(f"{Colors.CYAN} [i] JSON format selected. File will be updated every {json_freq} IPs.{Colors.ENDC}")
             f_handle.close() # Close for now
             f_handle = None
 
@@ -320,24 +321,34 @@ class IPTester:
                     sys.stdout.flush()
                     
                     # Save Real-time
-                    if res['status'] == 'SUCCESS' or settings.get('save_failed', False):
+                    should_save = res['status'] == 'SUCCESS' or settings.get('save_failed', False)
+                    if should_save:
                         if f_handle:
                             if output_format == 'csv':
                                 csv_writer.writerow(res)
                             elif output_format == 'txt':
                                 f_handle.write(f"{res['ip']} | {res['latency_ms']}ms | {res['status']}\n")
-                            f_handle.flush() # Ensure it hits disk
                         if output_format == 'json':
                             results.append(res)
-                            # Periodic JSON Save (Every 100 successes or so)
-                            if len(results) % 100 == 0:
-                                # Write to a temp file then rename? Or just overwrite.
-                                # Overwriting is safer than appending to JSON.
-                                try:
-                                    out = {"settings": settings, "results": results}
-                                    with open(filepath, 'w') as f:
-                                        json.dump(out, f, indent=2)
-                                except: pass
+
+                    # Periodic Update (Flush/Dump) based on TOTAL Scanned
+                    # Note: We use 'completed' count, which includes failures.
+                    if output_format == 'json':
+                        interval = settings.get('json_update_interval', 10000)
+                        if completed % interval == 0:
+                            try:
+                                out = {"settings": settings, "results": results}
+                                with open(filepath, 'w') as f:
+                                    json.dump(out, f, indent=2)
+                            except: pass
+                    elif output_format == 'txt' and f_handle:
+                        interval = settings.get('txt_update_interval', 1000)
+                        if completed % interval == 0:
+                            f_handle.flush()
+                    elif output_format == 'csv' and f_handle:
+                        interval = settings.get('csv_update_interval', 10000)
+                        if completed % interval == 0:
+                            f_handle.flush()
 
         print(f"\n{Colors.BOLD}Scan Finished or Stopped.{Colors.ENDC}")
         if f_handle:

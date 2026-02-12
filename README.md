@@ -60,7 +60,7 @@ To get a local copy up and running, follow these simple steps.
 This project was designed to be easily customizable. Here’s how you can modify its key parts:
 
 * **Scanning Logic:** The core scanning and testing logic (TCP/HTTP/UDP) is located in the `IPTester` class within `main.py`.
-* **Configuration:** You can adjust default timeouts, ports, and threads in `Config/settings.json`.
+* **Configuration:** You can adjust default timeouts, ports, threads, and **file update intervals** in `Config/settings.json`.
 * **Templates:** Add or remove IP range templates (e.g., for new CDNs) directly in `Config/settings.json`.
 * **UI/UX:** The terminal interface and file selector logic are improved in `utils.py`.
 
