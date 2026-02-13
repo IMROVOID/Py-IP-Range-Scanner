@@ -507,8 +507,17 @@ class IPTester:
                             interval = settings.get('json_update_interval', 10000)
                             if completed % interval == 0:
                                 try:
-                                    results.sort(key=lambda item: (0 if item['status'] == 'SUCCESS' else 1, item['latency_ms'] if item['latency_ms'] is not None else float('inf')))
-                                    out = {"settings": settings, "results": results}
+                                    # Filter and Clean Results for Dump
+                                    save_all = settings.get('save_failed', False)
+                                    dump_results = []
+                                    for r in results:
+                                        if r['status'] == 'SUCCESS' or save_all:
+                                            item = r.copy()
+                                            if not save_all and 'status' in item: del item['status']
+                                            dump_results.append(item)
+                                    
+                                    dump_results.sort(key=lambda item: (0 if item.get('status','SUCCESS') == 'SUCCESS' else 1, item['latency_ms'] if item['latency_ms'] is not None else float('inf')))
+                                    out = {"settings": settings, "results": dump_results}
                                     with open(filepath, 'w') as f: json.dump(out, f, indent=2)
                                 except: pass
                         elif output_format == 'txt' and f_handle:
@@ -524,7 +533,7 @@ class IPTester:
                  # Calculate remaining IPs
                  # We have `ips` (input to this function) and `results` (what finished).
                  # We need to save `ips` that are NOT in `results`.
-                 # Note: results are appended even if FAIL.
+                 # Note: results contain ALL attempts including FAILS, which is correct for checkpoint tracking.
                  scanned_set = set(r['ip'] for r in results)
                  remaining = [ip for ip in ips if ip not in scanned_set]
                  
@@ -550,8 +559,17 @@ class IPTester:
             # Final JSON dump
             if output_format == 'json' and results:
                 print("Saving Final JSON report...")
-                results.sort(key=lambda item: (0 if item['status'] == 'SUCCESS' else 1, item['latency_ms'] if item['latency_ms'] is not None else float('inf')))
-                out = {"settings": settings, "results": results}
+                # Filter and Clean Results for Dump
+                save_all = settings.get('save_failed', False)
+                dump_results = []
+                for r in results:
+                    if r['status'] == 'SUCCESS' or save_all:
+                        item = r.copy()
+                        if not save_all and 'status' in item: del item['status']
+                        dump_results.append(item)
+
+                dump_results.sort(key=lambda item: (0 if item.get('status', 'SUCCESS') == 'SUCCESS' else 1, item['latency_ms'] if item['latency_ms'] is not None else float('inf')))
+                out = {"settings": settings, "results": dump_results}
                 with open(filepath, 'w') as f: json.dump(out, f, indent=2)
             
             print(f"{Colors.GREEN}Results saved to: {filepath}{Colors.ENDC}")
