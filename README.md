@@ -5,13 +5,17 @@ A modern, high-performance IP range scanner and generator written in Python. Thi
 ## ✨ Key Features
 
 * **Multi-Threaded Scanning:** Utilizes `ThreadPoolExecutor` for high-speed concurrent scanning of thousands of IPs.
-* **Smart CIDR Handling:** intelligently expands CIDR ranges and includes safeguards against generating excessively large files (e.g., for IPv6).
+* **Smart CIDR Handling:** intelligently expands CIDR ranges and includes safeguards against generating excessively large files. Supports adjustable range levels (**Short, Medium, Full**).
 * **Multi-Protocol Support:** Capable of testing via **TCP, WebSocket (WS), HTTP, HTTPS, gRPC, QUIC, KCP, HTTPUpgrade, SplitHTTP, and xHTTP**.
-* **Template System:** Pre-configured templates for popular providers like Cloudflare and Fastly, with support for custom templates in `settings.json`.
-* **Flexible Output:** Saves results in multiple formats including **JSON, CSV, and TXT** for easy integration with other tools.
+* **Template System:** Pre-configured templates for popular providers like **Cloudflare** and **Fastly**, with support for custom templates in `settings.json`.
+* **Checkpoints & Resume:** Stop long scans at any time and resume exactly where you left off.
+* **Smart Generation:**
+  * Generate IP ranges from Templates, File Input, or direct **Terminal Input**.
+  * **Pre-Scan** option to filter reachable IPs before generating full ranges.
+  * Automatic **Provider Tagging** in generated filenames and scan results.
+* **Flexible Output:** Saves results in **JSON, CSV, and TXT**. Includes detailed metadata like Provider and Source.
 * **Interactive TUI:** A user-friendly terminal interface for selected files, configuring scan settings, and managing output.
 * **Dynamic Settings:** Change scan settings (like threads, timeout, port) *during* a scan by editing `settings.json`. The script detects changes and prompts to apply them in real-time.
-* **Smart Sorting:** Automatically sorts output files by **Ping Latency** (Success first) for easier analysis.
 
 ## 📁 Project Structure
 
@@ -22,8 +26,8 @@ The project is organized into a clean and scalable structure to make navigation 
 ├── Config/         # Configuration files (settings.json)
 ├── Input/          # Directory for input files containing IP ranges
 ├── Output/         # Directory where scan results and generated ranges are saved
+├── Checkpoints/    # Directory for scan checkpoints
 ├── main.py         # Main application entry point and logic
-├── utils.py        # Helper functions for TUI, file loading, and system operations
 └── requirements.txt # List of Python dependencies
 ```
 
@@ -63,8 +67,8 @@ This project was designed to be easily customizable. Here’s how you can modify
 
 * **Scanning Logic:** The core scanning and testing logic (TCP/HTTP/UDP) is located in the `IPTester` class within `main.py`.
 * **Configuration:** You can adjust default timeouts, ports, threads, and **file update intervals** in `Config/settings.json`.
+* **Range Levels:** Adjust the `ip_range_level` in settings to control how single IPs are expanded (Short=/24, Medium=/20, Full=/16).
 * **Templates:** Add or remove IP range templates (e.g., for new CDNs) directly in `Config/settings.json`.
-* **UI/UX:** The terminal interface and file selector logic are improved in `utils.py`.
 
 ## 🛠️ Technologies & Libraries Used
 
