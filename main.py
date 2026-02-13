@@ -15,7 +15,7 @@ import msvcrt
 
 # --- Colors ---
 class Colors:
-    HEADER = '\033[95m'
+    HEADER = '\033[96m' # Cyan
     BLUE = '\033[94m'
     CYAN = '\033[96m'
     GREEN = '\033[92m'
@@ -110,7 +110,7 @@ def terminal_file_selector(base_dir=".", extensions=None):
             msg = ""
             
         print(f"Selected: {len(selected_files)} files")
-        print("Controls: [Up/Down] Move | [Space] Select/Deselect | [Enter] Enter Dir/Confirm | [Backspace] Go Up")
+        print(f"{Colors.CYAN}Controls: [Up/Down] Move | [Space] Select/Deselect | [Enter] Enter Dir/Confirm | [Backspace] Go Up{Colors.ENDC}")
         print("-" * 50)
         
         MAX_H = 20
@@ -437,7 +437,7 @@ class IPTester:
         interactive_confirm_save: if True, prints results table after scan and confirmation to keep file
         """
         print(f"\n{Colors.HEADER}Starting Scan on {len(ips)} IPs...{Colors.ENDC}")
-        print(f"{Colors.CYAN}Controls: [P]ause | [S]top & Save | [Q]uit (No Save){Colors.ENDC}")
+        print(f"{Colors.CYAN}Controls: {Colors.WARNING}[P]{Colors.CYAN}ause | {Colors.FAIL}[S]{Colors.CYAN}top & Save | {Colors.FAIL}[Q]{Colors.CYAN}uit (No Save){Colors.ENDC}")
         
         max_threads = settings.get('threads', 100)
         output_format = settings.get('output_format', 'txt')
@@ -496,6 +496,7 @@ class IPTester:
             elif output_format == 'json':
                 json_freq = settings.get('json_update_interval', 10000)
                 print(f"{Colors.CYAN} [i] JSON format selected. File will be updated every {json_freq} IPs.{Colors.ENDC}")
+                print() # Spacing
 
             completed = 0
             success_count = 0
@@ -607,7 +608,7 @@ class IPTester:
                       status_col = Colors.GREEN if r['status']=='SUCCESS' else Colors.FAIL
                       print(f"{r['ip']:<20} | {str(r['latency_ms'])+'ms':<8} | {status_col}{r['status']}{Colors.ENDC}")
                       
-                 if input("\nSave results to file? (y/N): ").lower() != 'y':
+                 if input(f"\nSave results to file? ({Colors.GREEN}Y{Colors.ENDC}/n): ").lower() == 'n':
                       try: os.remove(filepath)
                       except: pass
                       print("Results discarded.")
@@ -845,19 +846,20 @@ def menu_scan_ip_ranges(cfg, tester, generator):
                 
                 if is_alive:
                     filtered.append(t)
-                    print(f"  [+] {t['cidr']}: Alive")
+                    print(f"  {Colors.GREEN}[+] {t['cidr']}: Alive{Colors.ENDC}")
                 else:
-                    print(f"  [-] {t['cidr']}: No response")
+                    print(f"  {Colors.FAIL}[-] {t['cidr']}: No response{Colors.ENDC}")
             except: pass
             
         if not filtered:
-            print("No ranges reachable. Aborting.")
+            print(f"{Colors.FAIL}No ranges reachable. Aborting.{Colors.ENDC}")
             time.sleep(2)
             return
             
         print(f"Filtered down to {len(filtered)} ranges.")
         working_targets = filtered
         time.sleep(1)
+        print() # Add spacing before generation
         
     elif pre_idx == 2: # Manual Selection
         opts = [f"{t['prefix']} - {t['cidr']}" for t in working_targets]
@@ -895,6 +897,9 @@ def menu_scan_ip_ranges(cfg, tester, generator):
             fname = os.path.basename(gf)
             parts = fname.split('_')
             provider = parts[0] if len(parts) > 1 else "Unknown"
+            
+            # Colorize filename print
+            print(f"Loading {Colors.CYAN}{fname}{Colors.ENDC}...")
             
             try:
                 with open(gf, 'r') as f:
@@ -1004,19 +1009,19 @@ def menu_settings(cfg):
         keys = [k for k in keys if k not in ['sources']]
         
         options = []
+        options.append(("", f"{Colors.FAIL}Back{Colors.ENDC}")) # Back on Top
+        
         for k in keys:
             val = defaults[k]
             # Colorize: Key (Cyan), Value (Green)
             disp = f"{Colors.CYAN}{k}{Colors.ENDC}: {Colors.GREEN}{val}{Colors.ENDC}"
             options.append((k, disp))
             
-        options.append(("", f"{Colors.FAIL}Back{Colors.ENDC}"))
-        
         idx = terminal_menu(options, "Global Settings (Select to Edit)")
         
-        if idx == len(options) - 1 or idx == -1: return
+        if idx == 0 or idx == -1: return # Back
         
-        key = keys[idx]
+        key = keys[idx - 1] # Adjust for Back being at 0
         current_val = defaults[key]
         
         print(f"\nEditing {Colors.BOLD}{key}{Colors.ENDC}")
@@ -1025,14 +1030,20 @@ def menu_settings(cfg):
         final_val = None
         
         # ComboBox Logic for specific keys
-        if key == 'port':
+        if isinstance(current_val, bool): # Boolean Toggle
+            bool_opts = ["True", "False"]
+            b_idx = terminal_menu(bool_opts, f"Select Value for {key} (Current: {current_val})")
+            if b_idx == 0: final_val = True
+            elif b_idx == 1: final_val = False
+            
+        elif key == 'port':
             common_ports = [80, 443, 8080, 8443, 2052, 2053, 2082, 2083, 2086, 2087, 2095, 2096]
             opts = [str(p) for p in common_ports]
             opts.append("Custom")
             p_idx = terminal_menu(opts, f"Select Port (Current: {current_val})")
             if p_idx == -1: continue
             if p_idx == len(opts) - 1: # Custom
-                val = input("Enter Custom Port: ").strip()
+                val = input("Enter Custom Port (or Enter to cancel): ").strip()
                 if val.isdigit(): final_val = int(val)
             else:
                 final_val = common_ports[p_idx]
@@ -1055,13 +1066,10 @@ def menu_settings(cfg):
             
         else:
             # Standard Text Input
-            new_val = input("Enter New Value (Enter to cancel): ").strip()
+            new_val = input("Enter New Value (or Enter to cancel): ").strip()
             if new_val:
                 # Type inference
-                if isinstance(current_val, bool):
-                     if new_val.lower() in ['true', '1', 'yes', 'y']: final_val = True
-                     elif new_val.lower() in ['false', '0', 'no', 'n']: final_val = False
-                elif isinstance(current_val, int):
+                if isinstance(current_val, int):
                     if new_val.isdigit(): final_val = int(new_val)
                 else:
                     final_val = new_val

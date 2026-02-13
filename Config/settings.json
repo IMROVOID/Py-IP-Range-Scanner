@@ -8,7 +8,7 @@
         "save_failed": false,
         "threads": 100,
         "ipv6_enabled": false,
-        "settings_check_interval": 1000,
+        "settings_check_interval": 2000,
         "json_update_interval": 2000,
         "txt_update_interval": 2000,
         "csv_update_interval": 2000,
