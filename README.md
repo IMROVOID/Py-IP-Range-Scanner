@@ -7,15 +7,18 @@ A modern, high-performance IP range scanner and generator written in Python. Thi
 * **Multi-Threaded Scanning:** Utilizes `ThreadPoolExecutor` for high-speed concurrent scanning of thousands of IPs.
 * **Smart CIDR Handling:** intelligently expands CIDR ranges and includes safeguards against generating excessively large files. Supports adjustable range levels (**Short, Medium, Full**).
 * **Multi-Protocol Support:** Capable of testing via **TCP, WebSocket (WS), HTTP, HTTPS, gRPC, QUIC, KCP, HTTPUpgrade, SplitHTTP, and xHTTP**.
-* **Template System:** Pre-configured templates for popular providers like **Cloudflare** and **Fastly**, with support for custom templates in `settings.json`.
+* **Template System:** Pre-configured templates for popular providers like **Cloudflare**, **Fastly**, and **ArvanCloud**, with support for custom templates in `settings.json`.
+* **Flexible Input:** robustly parses IPs/CIDRs from **JSON, TXT, CSV** or any raw text using regex. Supports nested JSON structures.
 * **Checkpoints & Resume:** Stop long scans at any time and resume exactly where you left off.
 * **Smart Generation:**
   * Generate IP ranges from Templates, File Input, or direct **Terminal Input**.
   * **Pre-Scan** option to filter reachable IPs before generating full ranges.
-  * Automatic **Provider Tagging** in generated filenames and scan results.
+  * **Custom Tagging:** Prompts for optional **Custom Provider Name** to tag generated files.
+* **Advanced Control:**
+  * **Pause Menu:** Press `P` to pause, with options to modify settings (Global or Runtime) mid-scan.
+  * **Dynamic Settings:** Change threading, timeout, etc., on the fly.
 * **Flexible Output:** Saves results in **JSON, CSV, and TXT**. Includes detailed metadata like Provider and Source.
 * **Interactive TUI:** A user-friendly terminal interface for selected files, configuring scan settings, and managing output.
-* **Dynamic Settings:** Change scan settings (like threads, timeout, port) *during* a scan by editing `settings.json`. The script detects changes and prompts to apply them in real-time.
 
 ## 📁 Project Structure
 
