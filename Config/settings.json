@@ -3,16 +3,16 @@
         "max_ping": 1000,
         "port": 443,
         "protocol": "tcp",
-        "timeout": 1000,
+        "ip_range_level": "Short",
+        "ipv6_enabled": false,
         "output_format": "json",
+        "timeout": 1000,
         "save_failed": false,
         "threads": 100,
-        "ipv6_enabled": false,
         "settings_check_interval": 2000,
         "json_update_interval": 2000,
         "txt_update_interval": 2000,
-        "csv_update_interval": 2000,
-        "ip_range_level": "Short"
+        "csv_update_interval": 2000
     },
     "templates": {
         "CloudFlare": {
