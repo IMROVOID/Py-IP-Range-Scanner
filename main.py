@@ -36,7 +36,7 @@ CHECKPOINTS_DIR = "Checkpoints"
 # Enable VT100 for Windows 10/11
 os.system('color')
 
-# --- Utils (Merged) ---
+# --- Utils ---
 
 def clear_screen():
     os.system('cls' if os.name == 'nt' else 'clear')
