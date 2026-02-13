@@ -921,6 +921,10 @@ def menu_scan_ip_ranges(cfg, tester, generator):
             
     elif idx == 1:
         files = terminal_file_selector(INPUT_DIR)
+        
+        provider_name = input(f"\n{Colors.CYAN}Enter Custom Provider Name (Optional, Press Enter for 'CustomFile'): {Colors.ENDC}").strip()
+        if not provider_name: provider_name = "CustomFile"
+        
         for f in files:
             # Use robust load_file which handles JSON/TXT/CSV/Regex
             loaded_data = load_file(f) 
@@ -928,13 +932,17 @@ def menu_scan_ip_ranges(cfg, tester, generator):
                 # entry is {'ip': '...'}
                 # We need to adapt it to targets: {'cidr': ..., 'prefix': ...}
                 if 'ip' in entry:
-                    targets.append({'cidr': entry['ip'], 'prefix': 'CustomFile'})
+                    targets.append({'cidr': entry['ip'], 'prefix': provider_name})
 
     elif idx == 2: # Terminal Input
         inp = input("\nEnter IPs/CIDRs (comma separated): ")
+        
+        provider_name = input(f"{Colors.CYAN}Enter Custom Provider Name (Optional, Press Enter for 'Manual'): {Colors.ENDC}").strip()
+        if not provider_name: provider_name = "Manual"
+        
         parts = [p.strip() for p in inp.split(',') if p.strip()]
         for p in parts:
-             targets.append({'cidr': p, 'prefix': 'Manual'})
+             targets.append({'cidr': p, 'prefix': provider_name})
              
     if not targets:
         print("No targets selected.")
