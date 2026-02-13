@@ -195,9 +195,56 @@ def load_file(filepath):
 def print_header(title="IP Range Generator"):
     clear_screen()
     print(f"{Colors.HEADER}={'='*60}{Colors.ENDC}")
-    print(f"{Colors.HEADER}{title.center(60)}{Colors.ENDC}")
+    print(f"{Colors.HEADER} {title.center(58)} {Colors.ENDC}")
     print(f"{Colors.HEADER}={'='*60}{Colors.ENDC}")
     print()
+
+def terminal_menu(options, title=None):
+    """
+    Renders a menu with arrow key navigation.
+    options: list of strings or tuples (key, display_text)
+    Returns: index of selected option
+    """
+    cursor_idx = 0
+    if title: print_header(title)
+    
+    # Normalize options to list of strings for display
+    display_options = []
+    for opt in options:
+        if isinstance(opt, tuple): display_options.append(opt[1])
+        else: display_options.append(str(opt))
+        
+    while True:
+        if title: 
+            clear_screen()
+            print_header(title)
+        else:
+            # If no title, we assume caller handles clearing/header or we just print menu
+            # But valid TUI usually wipes screen.
+            # Let's enforce clear screen if we want smooth redraw
+            print("\033[H", end="") # Move to home if supported, else clear
+            # Fallback to clear if title wasn't passed but we need redraw
+            pass
+
+        # Print Menu
+        for i, opt in enumerate(display_options):
+            if i == cursor_idx:
+                print(f"{Colors.CYAN} > {opt} {Colors.ENDC}")
+            else:
+                print(f"   {opt}")
+        
+        print(f"\n{Colors.CYAN}Use [Up/Down] to Navigate, [Enter] to Select{Colors.ENDC}")
+        
+        key = get_key()
+        if key == 'UP':
+            cursor_idx = (cursor_idx - 1) % len(options)
+        elif key == 'DOWN':
+            cursor_idx = (cursor_idx + 1) % len(options)
+        elif key == 'ENTER':
+            return cursor_idx
+        elif key == 'ESC':
+            return -1 # Cancel/Back convention
+
 
 # --- Core Logic ---
 
@@ -635,55 +682,42 @@ def get_user_settings_override(current_defaults):
     return current_defaults
 
 def menu_scan_ip_ranges(cfg, tester, generator):
-    print_header("Generate & Scan IP Ranges")
-    
     settings = cfg.get_defaults()
     templates = cfg.get_templates()
     
-    print("Select Source:")
-    print("  1. Templates (Cloudflare, Fastly, etc.)")
-    print("  2. File Input (List of CIDRs)")
-    print("  3. Terminal Input (Manual)")
-    print("  4. Back")
-    src = input("\nSelect (1-4): ").strip()
+    options = [
+        "1. Templates (Cloudflare, Fastly, etc.)",
+        "2. File Input (List of CIDRs)",
+        "3. Terminal Input (Manual)",
+        "4. Back"
+    ]
     
-    if src == '4': return
+    idx = terminal_menu(options, "Generate & Scan IP Ranges")
+    if idx == 3 or idx == -1: return
     
     targets = [] # List of {'cidr': str, 'prefix': str}
     
-    if src == '1':
-        print("\nAvailable Templates:")
+    if idx == 0:
         t_keys = list(templates.keys())
-        for i, t in enumerate(t_keys):
-            print(f"  {i+1}. {t}")
+        templ_options = [f"{i+1}. {t}" for i, t in enumerate(t_keys)]
+        templ_options.append("3. All Templates")
         
-        print(f"  A. All Templates")
+        sel_idx = terminal_menu(templ_options, "Select Template")
         
-        sel = input("\nSelect Template (Number/s, comma separated): ").strip().lower()
+        if sel_idx == -1: return # Back
         
-        selected_keys = []
-        if sel == 'a':
+        if sel_idx == len(t_keys): # All Templates (Last option)
             selected_keys = t_keys
         else:
-            parts = [p.strip() for p in sel.split(',') if p.strip()]
-            for p in parts:
-                if p.isdigit() and 1 <= int(p) <= len(t_keys):
-                    selected_keys.append(t_keys[int(p)-1])
-        
-        if not selected_keys and sel: print("Invalid selection.")
-
+            selected_keys = [t_keys[sel_idx]]
+            
         for key in selected_keys:
             cidrs = templates[key]
             for c in cidrs: targets.append({'cidr': c, 'prefix': key})
             
-    elif src == '2':
+    elif idx == 1:
         files = terminal_file_selector(INPUT_DIR)
         for f in files:
-            load_data = load_file(f)
-            # Expecting simple list of CIDRs in file or lines
-            # load_file returns [{'ip':...}] for txt if parsing like ip|...
-            # But here we want RAW lines usually.
-            # Let's re-read file directly as lines for CIDRs
             try:
                 with open(f, 'r') as fh:
                     for line in fh:
@@ -691,32 +725,34 @@ def menu_scan_ip_ranges(cfg, tester, generator):
                         if line: targets.append({'cidr': line, 'prefix': 'CustomFile'})
             except: pass
 
-    elif src == '3': # Terminal Input
-        inp = input("Enter IPs/CIDRs (comma separated): ")
+    elif idx == 2: # Terminal Input
+        inp = input("\nEnter IPs/CIDRs (comma separated): ")
         parts = [p.strip() for p in inp.split(',') if p.strip()]
         for p in parts:
              targets.append({'cidr': p, 'prefix': 'Manual'})
              
     if not targets:
         print("No targets selected.")
+        time.sleep(1)
         return
 
-    # Pre-Scan Check
-    print(f"\n{Colors.CYAN}Options:{Colors.ENDC}")
-    print("  1. Generate ALL Ranges immediately")
-    print("  2. Pre-Scan/Ping IPs first (Filter unreachable targets)")
-    if input("Select (1/2): ").strip() == '2':
-        # logic for pre-scan (pinging the range network address?)
-        # For now, just generate.
-        pass
-        
+    # Pre-Scan Check (Optional workflow improvement: skip for now or make quicker)
+    # User said "Pinging and Generating ... wont work now", implied interruptions.
+    # Let's just generate directly as per "Fix Generation Workflow".
+    
     working_targets = targets
     
     # Generate
     generated_files = generator.generate_and_save(working_targets, settings)
     
     if generated_files:
-        if input("\nDo you want to scan EACH IP in these ranges? (y/N): ").lower() == 'y':
+        # Ask to scan without interrupting "Settings" check
+        print("\nRange Generation Complete.")
+        
+        scan_opts = ["1. Start Scanning Now", "2. Return to Menu"]
+        s_idx = terminal_menu(scan_opts, "Scan Generated Ranges?")
+        
+        if s_idx == 0:
             all_ips = []
             ip_provider_map = {}
             
@@ -737,19 +773,21 @@ def menu_scan_ip_ranges(cfg, tester, generator):
             tester.scan_ips(all_ips, settings, sources_info=ip_provider_map, source_files=generated_files)
 
 def menu_scan_ips(cfg, tester):
-    print_header("Scan IPs (Direct)")
-    print("  1. Terminal Input")
-    print("  2. File Input")
-    print(f"  3. Resume Checkpoint ({Colors.WARNING}New!{Colors.ENDC})")
-    print("  4. Back")
-    src = input("\nSelect (1-4): ").strip()
+    options = [
+        "1. Terminal Input",
+        "2. File Input",
+        "3. Resume Checkpoint",
+        "4. Back"
+    ]
     
-    if src == '4': return
+    idx = terminal_menu(options, "Scan IPs (Direct)")
+    if idx == 3 or idx == -1: return
     
-    if src == '3':
+    if idx == 2:
         # Resume Logic
         if not os.path.exists(CHECKPOINTS_DIR):
              print("No Checkpoints found.")
+             time.sleep(1)
              return
              
         files = terminal_file_selector(CHECKPOINTS_DIR, extensions=['.json'])
@@ -783,23 +821,26 @@ def menu_scan_ips(cfg, tester):
                 print(f"Resuming {len(resume_ips)} IPs from checkpoint data.")
             else:
                 print("Invalid checkpoint: No IPs found.")
+                time.sleep(1)
                 return
 
             print(f"Resuming {cp['filename']} ({cp['timestamp']})")
             
+            # Resume directly without asking for settings override
             tester.scan_ips(resume_ips, cp['settings'], resume_data=cp, sources_info=cp.get('sources_info'), source_files=backup_files)
             
         except Exception as e:
             print(f"Error resuming: {e}")
+            time.sleep(2)
         return
 
     ips_to_scan = []
     
     selected_files = []
-    if src == '1':
+    if idx == 0:
         inp = input("Enter IP (or comma separated): ")
         ips_to_scan = [i.strip() for i in inp.split(',') if i.strip()]
-    elif src == '2':
+    elif idx == 1:
         files = terminal_file_selector(INPUT_DIR)
         selected_files = files # Store for passing to scan_ips
         for f in files:
@@ -809,31 +850,57 @@ def menu_scan_ips(cfg, tester):
                 
     if not ips_to_scan: return
         
-    settings = get_user_settings_override(cfg.get_defaults())
+    # No settings override prompt
+    settings = cfg.get_defaults()
     tester.scan_ips(ips_to_scan, settings, source_files=selected_files)
 
 def menu_settings(cfg):
     while True:
         defaults = cfg.get_defaults()
-        print_header("Global Settings")
-        for k, v in defaults.items():
-            print(f"  {k}: {v}")
-            
-        print("\nCommands: 'edit <key> <value>', 'back'")
-        cmd = input("> ").strip().split()
+        # Sort keys for consistent display
+        keys = sorted(defaults.keys())
         
-        if not cmd: continue
-        if cmd[0] == 'back': return
-        if cmd[0] == 'edit' and len(cmd) >= 3:
-            key = cmd[1]
-            val = cmd[2]
-            # Type casting
-            if val.isdigit(): val = int(val)
-            elif val.lower() == 'true': val = True
-            elif val.lower() == 'false': val = False
+        options = []
+        for k in keys:
+            val = defaults[k]
+            # Colorize: Key (Cyan), Value (White/Green)
+            disp = f"{Colors.CYAN}{k}{Colors.ENDC}: {Colors.GREEN}{val}{Colors.ENDC}"
+            options.append((k, disp))
             
-            cfg.update_default(key, val)
+        options.append(("", f"{Colors.FAIL}Back{Colors.ENDC}"))
+        
+        idx = terminal_menu(options, "Global Settings (Select to Edit)")
+        
+        if idx == len(options) - 1 or idx == -1: return
+        
+        key = keys[idx]
+        current_val = defaults[key]
+        
+        print(f"\nEditing {Colors.BOLD}{key}{Colors.ENDC}")
+        print(f"Current Value: {current_val}")
+        new_val = input("Enter New Value (Enter to cancel): ").strip()
+        
+        if new_val:
+            # Type inference
+            if isinstance(current_val, bool):
+                 if new_val.lower() in ['true', '1', 'yes', 'y']: final_val = True
+                 elif new_val.lower() in ['false', '0', 'no', 'n']: final_val = False
+                 else: 
+                     print("Invalid boolean. Keeping current.")
+                     time.sleep(1)
+                     continue
+            elif isinstance(current_val, int):
+                if new_val.isdigit(): final_val = int(new_val)
+                else:
+                    print("Invalid integer. Keeping current.")
+                    time.sleep(1)
+                    continue
+            else:
+                final_val = new_val
+                
+            cfg.update_default(key, final_val)
             print("Updated.")
+            time.sleep(0.5)
 
 def main_menu():
     cfg = ConfigManager()
@@ -844,19 +911,23 @@ def main_menu():
     for d in [INPUT_DIR, TEMP_DIR, OUTPUT_RANGES_DIR, OUTPUT_FINAL_DIR]:
         if not os.path.exists(d): os.makedirs(d)
 
+    options = [
+        "1. Scan IP Ranges (Generate & Scan)",
+        "2. Scan IPs (Direct Input/File/Resume)",
+        "3. Settings",
+        "4. Exit"
+    ]
+
     while True:
-        print_header("Py IP Range Scanner")
-        print("  1. Scan IP Ranges (Generate & Scan)")
-        print("  2. Scan IPs (Direct Input/File)")
-        print("  3. Settings")
-        print("  4. Exit")
+        idx = terminal_menu(options, "Py IP Range Scanner")
         
-        choice = input("\nSelect (1-4): ").strip()
-        
-        if choice == '1': menu_scan_ip_ranges(cfg, tester, generator)
-        elif choice == '2': menu_scan_ips(cfg, tester)
-        elif choice == '3': menu_settings(cfg)
-        elif choice == '4': 
+        if idx == 0: 
+            menu_scan_ip_ranges(cfg, tester, generator)
+        elif idx == 1: 
+            menu_scan_ips(cfg, tester)
+        elif idx == 2: 
+            menu_settings(cfg)
+        elif idx == 3 or idx == -1:
             print("Goodbye!")
             break
 
