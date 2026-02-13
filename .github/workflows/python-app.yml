@@ -1,4 +1,4 @@
-name: Python Application Build
+name: Build Python App
 
 on:
   push:
@@ -6,16 +6,14 @@ on:
   pull_request:
     branches: [ "master", "main" ]
 
-permissions:
-  contents: read
-
 jobs:
   build:
-
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
-        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14-dev"]
 
     steps:
     - uses: actions/checkout@v4
@@ -24,13 +22,14 @@ jobs:
       uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
+        allow-prereleases: true
         
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+        pip install -r requirements.txt
         
     - name: Syntax Check
       run: |
-        # Check for syntax errors
+        # Compile all python files to check for syntax errors
         python -m py_compile main.py
