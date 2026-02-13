@@ -12,6 +12,7 @@ import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 import msvcrt
+import re
 
 # --- Colors ---
 class Colors:
@@ -155,41 +156,82 @@ def terminal_file_selector(base_dir=".", extensions=None):
             print("\nCancelled.")
             return [] 
 
+def extract_ips_from_text(text):
+    """
+    Extracts IPv4 and IPv6 addresses/CIDRs from any text using regex.
+    """
+    # IPv4 CIDR or IP: x.x.x.x or x.x.x.x/xx
+    ipv4_pattern = r'\b(?:\d{1,3}\.){3}\d{1,3}(?:/\d{1,2})?\b'
+    
+    # IPv6 CIDR or IP (simplified but practical)
+    ipv6_pattern = r'(?:[0-9a-fA-F]{1,4}:){2,}(?:[0-9a-fA-F]{1,4}:?)(?:/\d{1,3})?'
+    
+    ips = []
+    
+    # Find all IPv4
+    for match in re.findall(ipv4_pattern, text):
+        ips.append(match)
+        
+    # Find all IPv6
+    for match in re.findall(ipv6_pattern, text):
+        ips.append(match)
+        
+    return list(set(ips)) # Dedup
+
 def load_file(filepath):
-    """Loads content from a file (JSON, CSV, or TXT)."""
+    """
+    Loads IPs/CIDRs from a file (JSON, CSV, or TXT) using robust regex extraction.
+    Supports nested JSON, messy TXT, etc.
+    Returns: List of dicts {'ip': str, ...} or just strings if lazy
+    """
     if not os.path.exists(filepath):
         print(f"File not found: {filepath}")
         return []
         
-    ext = os.path.splitext(filepath)[1].lower()
     data = []
     
     try:
-        with open(filepath, 'r', encoding='utf-8') as f:
-            if ext == '.json':
-                content = json.load(f)
-                if isinstance(content, list):
-                    data.extend(content)
-            elif ext == '.csv':
-                reader = csv.DictReader(f)
-                for row in reader:
-                    data.append(row)
-            elif ext == '.txt':
-                 for line in f:
-                    line = line.strip()
-                    if not line: continue
-                    parts = line.split('|')
-                    entry = {"ip": parts[0].strip()}
-                    if len(parts) > 1:
-                        rest = [p.strip() for p in parts[1:]]
-                        for r in rest:
-                             if r.isdigit() or r.replace('ms','').strip().isdigit():
-                                 entry['latency_ms'] = int(r.replace('ms','').strip())
-                             elif r.upper() in ['SUCCESS', 'FAIL', 'OK', 'ERROR']:
-                                 entry['status'] = r.upper()
-                    data.append(entry)
+        with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+            content = f.read()
+            
+        # 1. Try JSON First (for structured data preservation like latency/provider)
+        try:
+            json_content = json.loads(content)
+            
+            # Recursive helper to find objects with 'ip' key
+            def extract_from_json(obj):
+                if isinstance(obj, dict):
+                    if 'ip' in obj:
+                        entry = {'ip': obj['ip']}
+                        if 'latency_ms' in obj: entry['latency_ms'] = obj['latency_ms']
+                        if 'status' in obj: entry['status'] = obj['status']
+                        if 'provider' in obj: entry['provider'] = obj['provider']
+                        data.append(entry)
+                    for k, v in obj.items(): extract_from_json(v)
+                elif isinstance(obj, list):
+                    for item in obj: extract_from_json(item)
+                    
+            extract_from_json(json_content)
+            
+            if data: return data # If structured data found, return it
+            
+            # If JSON parsed but no 'ip' keys found, fall back to regex on string dump
+            
+        except json.JSONDecodeError:
+            pass # Not JSON, proceed to regex
+            
+        # 2. Regex Extraction (Fallback or for TXT/CSV)
+        extracted_ips = extract_ips_from_text(content)
+        for ip in extracted_ips:
+            # Basic validation
+            try:
+                ipaddress.ip_network(ip, strict=False)
+                data.append({"ip": ip})
+            except: pass
+            
     except Exception as e:
         print(f"Error loading {filepath}: {e}")
+        
     return data
 
 def print_header(title="IP Range Generator"):
@@ -297,6 +339,71 @@ def terminal_multiselect(options, title="Select Items"):
         elif key == 'ESC':
             return []
 
+
+def pause_menu(state, cfg, current_settings):
+    """
+    Displays the Pause Menu and handles interaction.
+    """
+    while True:
+        clear_screen()
+        print_header("PAUSE MENU")
+        print(f"{Colors.WARNING}Scan is PAUSED.{Colors.ENDC}")
+        print()
+        
+        options = [
+            "1. Resume Scan",
+            "2. Settings (Change Runtime/Global)",
+            "3. Stop & Save",
+            "4. Quit (No Save)"
+        ]
+        
+        idx = terminal_menu(options)
+        
+        if idx == 0: # Resume
+            state.paused = False
+            return
+            
+        elif idx == 1: # Settings
+            # Reuse menu_settings but we need to know if we apply to Global or just Current
+            # menu_settings modifies 'cfg' (global).
+            # We also want to modify 'current_settings' (runtime).
+            
+            s_opts = ["1. Edit Global Config (Permanent)", "2. Edit Current Scan Settings (Runtime only)", "3. Back"]
+            s_idx = terminal_menu(s_opts, "Settings Mode")
+            
+            if s_idx == 0:
+                menu_settings(cfg)
+                # Re-read defaults to apply to current if desired?
+                # Usually user expects global change to apply now.
+                # Let's update current_settings from cfg
+                new_defs = cfg.get_defaults()
+                current_settings.update(new_defs)
+                print("Global settings applied to current scan.")
+                time.sleep(1)
+                
+            elif s_idx == 1:
+                # We need a temp config manager wrapper to edit 'current_settings'
+                # Hack: Just use menu_settings logic but pass a mocked cfg?
+                # Or just manually edit key values here?
+                # Re-using menu_settings is best if possible.
+                # Let's create a dummy ConfigManager that wraps current_settings
+                class RuntimeConfig:
+                    def get_defaults(self): return current_settings
+                    def update_default(self, k, v): current_settings[k] = v
+                
+                menu_settings(RuntimeConfig())
+                print("Runtime settings updated.")
+                time.sleep(1)
+                
+        elif idx == 2: # Stop & Save
+            state.stop_save()
+            state.paused = False # Break pause loop to let main loop exit
+            return
+            
+        elif idx == 3: # Quit
+            state.stop_no_save()
+            state.paused = False
+            return
 
 # --- Core Logic ---
 
@@ -470,10 +577,15 @@ class IPTester:
         
         def input_listener():
             while not state.stopped:
+                if state.paused:
+                     time.sleep(0.5) # Yield control to pause menu in main thread
+                     continue
+                     
                 if msvcrt.kbhit():
                     try:
                         key = msvcrt.getch().lower()
-                        if key == b'p': state.toggle_pause()
+                        if key == b'p': 
+                            state.paused = True
                         elif key == b's': state.stop_save()
                         elif key == b'q': state.stop_no_save()
                     except: pass
@@ -531,7 +643,19 @@ class IPTester:
             with ThreadPoolExecutor(max_workers=max_threads) as executor:
                 for ip in ips:
                     if state.stopped: break
-                    while state.paused: time.sleep(0.2)
+                    
+                    # Pause Loop with Menu
+                    while state.paused: 
+                        # Entering Pause Menu (Blocking Main Thread)
+                        # Listener thread is yielding because state.paused is True
+                        pause_menu(state, self.cfg, settings)
+                        # When pause_menu returns, state.paused might be False (Resume) or True (Stop)
+                        if state.stopped: break
+                        
+                        # Clear screen resume message
+                        print(f"\n{Colors.GREEN} [RESUMED] Continuing scan...{Colors.ENDC}")
+                    
+                    if state.stopped: break
                     
                     ft = executor.submit(task, ip)
                     futures[ft] = ip
