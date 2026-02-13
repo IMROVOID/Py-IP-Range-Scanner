@@ -203,7 +203,6 @@ def terminal_menu(options, title=None):
     """
     Renders a menu with arrow key navigation.
     options: list of strings or tuples (key, display_text)
-    Returns: index of selected option
     """
     cursor_idx = 0
     if title: print_header(title)
@@ -219,13 +218,8 @@ def terminal_menu(options, title=None):
             clear_screen()
             print_header(title)
         else:
-            # If no title, we assume caller handles clearing/header or we just print menu
-            # But valid TUI usually wipes screen.
-            # Let's enforce clear screen if we want smooth redraw
-            print("\033[H", end="") # Move to home if supported, else clear
-            # Fallback to clear if title wasn't passed but we need redraw
-            pass
-
+            print("\033[H", end="") # Move to home
+            
         # Print Menu
         for i, opt in enumerate(display_options):
             if i == cursor_idx:
@@ -244,6 +238,64 @@ def terminal_menu(options, title=None):
             return cursor_idx
         elif key == 'ESC':
             return -1 # Cancel/Back convention
+
+def terminal_multiselect(options, title="Select Items"):
+    """
+    Renders a multiselect menu.
+    options: list of strings or tuples (key, display_text)
+    Returns: list of selected indices
+    """
+    selected_indices = set(range(len(options))) # Default all selected
+    cursor_idx = 0
+    
+    # Normalize
+    display_options = []
+    for opt in options:
+        if isinstance(opt, tuple): display_options.append(opt[1])
+        else: display_options.append(str(opt))
+        
+    while True:
+        clear_screen()
+        if title: print_header(title)
+        
+        print(f"Selected: {len(selected_indices)}/{len(options)}")
+        
+        MAX_H = 15
+        start_slice = max(0, cursor_idx - MAX_H // 2)
+        end_slice = min(len(display_options), start_slice + MAX_H)
+        
+        for i in range(start_slice, end_slice):
+            opt = display_options[i]
+            prefix = " > " if i == cursor_idx else "   "
+            mark = "[*]" if i in selected_indices else "[ ]"
+            
+            # Highlight cursor row
+            if i == cursor_idx:
+                print(f"{Colors.CYAN}{prefix}{mark} {opt}{Colors.ENDC}")
+            else:
+                print(f"{prefix}{mark} {opt}")
+                
+        if end_slice < len(display_options):
+            print("   ... (more) ...")
+            
+        print(f"\n{Colors.CYAN}[Space] Toggle | [Enter] Confirm | [A] All | [N] None{Colors.ENDC}")
+        
+        key = get_key()
+        if key == 'UP':
+            cursor_idx = max(0, cursor_idx - 1)
+        elif key == 'DOWN':
+            cursor_idx = min(len(options) - 1, cursor_idx + 1)
+        elif key == 'SPACE':
+            if cursor_idx in selected_indices: selected_indices.remove(cursor_idx)
+            else: selected_indices.add(cursor_idx)
+        elif key == 'ENTER':
+            return sorted(list(selected_indices))
+        elif key == 'a':
+            selected_indices = set(range(len(options)))
+        elif key == 'n':
+            selected_indices = set()
+        elif key == 'ESC':
+            return []
 
 
 # --- Core Logic ---
@@ -727,9 +779,20 @@ def menu_scan_ip_ranges(cfg, tester, generator):
         else:
             selected_keys = [t_keys[sel_idx]]
             
+        ipv6_enabled = settings.get('ipv6_enabled', False)
+        
         for key in selected_keys:
-            cidrs = templates[key]
-            for c in cidrs: targets.append({'cidr': c, 'prefix': key})
+            tmpl_data = templates[key]
+            
+            # Handle potential dictionary structure (ipv4/ipv6 keys)
+            if isinstance(tmpl_data, dict):
+                 for ip_type, cidr_list in tmpl_data.items():
+                      if ip_type == 'ipv6' and not ipv6_enabled: continue
+                      if isinstance(cidr_list, list):
+                           for c in cidr_list: targets.append({'cidr': c, 'prefix': key})
+            elif isinstance(tmpl_data, list):
+                 # Legacy or simple list support
+                 for c in tmpl_data: targets.append({'cidr': c, 'prefix': key})
             
     elif idx == 1:
         files = terminal_file_selector(INPUT_DIR)
@@ -752,42 +815,96 @@ def menu_scan_ip_ranges(cfg, tester, generator):
         time.sleep(1)
         return
 
-    # Pre-Scan Check (Optional workflow improvement: skip for now or make quicker)
-    # User said "Pinging and Generating ... wont work now", implied interruptions.
-    # Let's just generate directly as per "Fix Generation Workflow".
-    
     working_targets = targets
     
+    # --- Pre-Generation Workflow ---
+    print(f"\nLoaded {len(working_targets)} target ranges.")
+    pre_opts = [
+        "1. Generate All (Default)",
+        "2. Ping Check (Filter Unreachable)",
+        "3. Manual Selection"
+    ]
+    pre_idx = terminal_menu(pre_opts, "Pre-Generation Options")
+    
+    if pre_idx == 1: # Ping Check
+        print(f"\n{Colors.CYAN}Pinging gateway IPs to filter unreachable ranges...{Colors.ENDC}")
+        filtered = []
+        for t in working_targets:
+            # Simple check: Try to connect to network address (or +1)
+            # For this simple tool, let's just use the first IP in range
+            try:
+                net = ipaddress.ip_network(t['cidr'], strict=False)
+                test_ip = str(net[1]) if net.num_addresses > 1 else str(net[0])
+                
+                # Quick TCP connect to 80 or 443
+                is_alive = False
+                for p in [80, 443]:
+                    if tester.test_tcp(test_ip, p, 0.5): # 500ms timeout
+                        is_alive = True
+                        break
+                
+                if is_alive:
+                    filtered.append(t)
+                    print(f"  [+] {t['cidr']}: Alive")
+                else:
+                    print(f"  [-] {t['cidr']}: No response")
+            except: pass
+            
+        if not filtered:
+            print("No ranges reachable. Aborting.")
+            time.sleep(2)
+            return
+            
+        print(f"Filtered down to {len(filtered)} ranges.")
+        working_targets = filtered
+        time.sleep(1)
+        
+    elif pre_idx == 2: # Manual Selection
+        opts = [f"{t['prefix']} - {t['cidr']}" for t in working_targets]
+        sel_indices = terminal_multiselect(opts, "Select Ranges to Generate")
+        if not sel_indices: return
+        working_targets = [working_targets[i] for i in sel_indices]
+
     # Generate
     generated_files = generator.generate_and_save(working_targets, settings)
     
     if generated_files:
         print("\nRange Generation Complete.")
-        # Pause to let user see the output before clearing screen
         input("Press Enter to continue...")
         
-        scan_opts = ["1. Start Scanning Now", "2. Return to Menu"]
+        # --- Post-Generation Workflow ---
+        
+        scan_opts = ["1. Scan All Generated Files (Default)", "2. Select Files to Scan", "3. Return to Menu"]
         s_idx = terminal_menu(scan_opts, "Scan Generated Ranges?")
         
-        if s_idx == 0:
-            all_ips = []
-            ip_provider_map = {}
+        files_to_scan = generated_files
+        
+        if s_idx == 1: # Select Files
+            f_opts = [os.path.basename(f) for f in generated_files]
+            sel_indices = terminal_multiselect(f_opts, "Select Files to Scan")
+            if not sel_indices: return
+            files_to_scan = [generated_files[i] for i in sel_indices]
+        elif s_idx == 2 or s_idx == -1:
+            return
+
+        all_ips = []
+        ip_provider_map = {}
+        
+        for gf in files_to_scan:
+            # Parse provider from filename prefix
+            fname = os.path.basename(gf)
+            parts = fname.split('_')
+            provider = parts[0] if len(parts) > 1 else "Unknown"
             
-            for gf in generated_files:
-                # Parse provider from filename prefix
-                fname = os.path.basename(gf)
-                parts = fname.split('_')
-                provider = parts[0] if len(parts) > 1 else "Unknown"
-                
-                try:
-                    with open(gf, 'r') as f:
-                        lines = [line.strip() for line in f if line.strip()]
-                        all_ips.extend(lines)
-                        for ip in lines: ip_provider_map[ip] = provider
-                except: pass
-            
-            # Pass generated_files as source_files for backup
-            tester.scan_ips(all_ips, settings, sources_info=ip_provider_map, source_files=generated_files)
+            try:
+                with open(gf, 'r') as f:
+                    lines = [line.strip() for line in f if line.strip()]
+                    all_ips.extend(lines)
+                    for ip in lines: ip_provider_map[ip] = provider
+            except: pass
+        
+        # Pass files_to_scan as source_files for backup
+        tester.scan_ips(all_ips, settings, sources_info=ip_provider_map, source_files=files_to_scan)
 
 def menu_scan_ips(cfg, tester):
     options = [

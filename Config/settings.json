@@ -1,10 +1,10 @@
 {
     "defaults": {
         "max_ping": 1000,
-        "port": 443, // Common Ports: 80 (HTTP), 443 (HTTPS), 8080 (Alt HTTP), 8443 (Alt HTTPS), 2052, 2053, 2082, 2083, 2086, 2087, 2095, 2096
-        "protocol": "tcp", // Supported: tcp, ws, grpc, kcp, quic, http, https, httpupgrade, splithttp, xhttp
+        "port": 443,
+        "protocol": "tcp",
         "timeout": 1000,
-        "output_format": "json", // Options: json, csv, txt
+        "output_format": "json",
         "save_failed": false,
         "threads": 100,
         "ipv6_enabled": false,
@@ -12,7 +12,7 @@
         "json_update_interval": 2000,
         "txt_update_interval": 2000,
         "csv_update_interval": 2000,
-        "ip_range_level": "Short" // Options: Short (256), Medium (4096), Full (65536)
+        "ip_range_level": "Short"
     },
     "templates": {
         "CloudFlare": {
