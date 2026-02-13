@@ -657,9 +657,22 @@ def menu_scan_ip_ranges(cfg, tester, generator):
         for i, t in enumerate(t_keys):
             print(f"  {i+1}. {t}")
         
-        sel = input("\nSelect Template (Number): ").strip()
-        if sel.isdigit() and 1 <= int(sel) <= len(t_keys):
-            key = t_keys[int(sel)-1]
+        print(f"  A. All Templates")
+        
+        sel = input("\nSelect Template (Number/s, comma separated): ").strip().lower()
+        
+        selected_keys = []
+        if sel == 'a':
+            selected_keys = t_keys
+        else:
+            parts = [p.strip() for p in sel.split(',') if p.strip()]
+            for p in parts:
+                if p.isdigit() and 1 <= int(p) <= len(t_keys):
+                    selected_keys.append(t_keys[int(p)-1])
+        
+        if not selected_keys and sel: print("Invalid selection.")
+
+        for key in selected_keys:
             cidrs = templates[key]
             for c in cidrs: targets.append({'cidr': c, 'prefix': key})
             
