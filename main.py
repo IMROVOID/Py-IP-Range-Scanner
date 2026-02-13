@@ -375,13 +375,14 @@ class IPTester:
         elif proto in ['udp', 'kcp', 'quic']: return self.test_udp(ip, port, timeout)
         return None
 
-    def scan_ips(self, ips, settings, output_dir=OUTPUT_FINAL_DIR, resume_data=None, sources_info=None, source_files=None):
+    def scan_ips(self, ips, settings, output_dir=OUTPUT_FINAL_DIR, resume_data=None, sources_info=None, source_files=None, interactive_confirm_save=False):
         """
         ips: list of IP strings
         settings: dict
         resume_data: dict containing previous results if resuming
         sources_info: list of strings describing sources (e.g. ['CloudFlare', 'Fastly']) or dict {ip: provider}
         source_files: list of file paths used as input (for backup)
+        interactive_confirm_save: if True, prints results table after scan and confirmation to keep file
         """
         print(f"\n{Colors.HEADER}Starting Scan on {len(ips)} IPs...{Colors.ENDC}")
         print(f"{Colors.CYAN}Controls: [P]ause | [S]top & Save | [Q]uit (No Save){Colors.ENDC}")
@@ -545,6 +546,21 @@ class IPTester:
             print(f"\n{Colors.BOLD}Scan Finished or Stopped.{Colors.ENDC}")
             if f_handle: f_handle.close()
             
+            # Interactive Small Batch Confirmation
+            if interactive_confirm_save and not state.stopped:
+                 print(f"\n{Colors.HEADER}--- Scan Results ---{Colors.ENDC}")
+                 print(f"{'IP':<20} | {'Ping':<8} | {'Status'}")
+                 print("-" * 50)
+                 for r in results:
+                      status_col = Colors.GREEN if r['status']=='SUCCESS' else Colors.FAIL
+                      print(f"{r['ip']:<20} | {str(r['latency_ms'])+'ms':<8} | {status_col}{r['status']}{Colors.ENDC}")
+                      
+                 if input("\nSave results to file? (y/N): ").lower() != 'y':
+                      try: os.remove(filepath)
+                      except: pass
+                      print("Results discarded.")
+                      return
+
             # --- Checkpoint & Final Save ---
             
             if state.save_progress and state.stopped:
@@ -746,8 +762,9 @@ def menu_scan_ip_ranges(cfg, tester, generator):
     generated_files = generator.generate_and_save(working_targets, settings)
     
     if generated_files:
-        # Ask to scan without interrupting "Settings" check
         print("\nRange Generation Complete.")
+        # Pause to let user see the output before clearing screen
+        input("Press Enter to continue...")
         
         scan_opts = ["1. Start Scanning Now", "2. Return to Menu"]
         s_idx = terminal_menu(scan_opts, "Scan Generated Ranges?")
@@ -806,6 +823,8 @@ def menu_scan_ips(cfg, tester):
                 all_backed_up_ips = []
                 for bf in backup_files:
                     if os.path.exists(bf):
+                        # Use load_file logic (needs to be accessible or duplicated simpler)
+                        # load_file is global.
                         for d in load_file(bf):
                             if 'ip' in d: all_backed_up_ips.append(d['ip'])
                     else:
@@ -852,18 +871,25 @@ def menu_scan_ips(cfg, tester):
         
     # No settings override prompt
     settings = cfg.get_defaults()
-    tester.scan_ips(ips_to_scan, settings, source_files=selected_files)
+    
+    # Check for interactive small batch
+    is_interactive = (idx == 0 and len(ips_to_scan) < 10)
+    
+    tester.scan_ips(ips_to_scan, settings, source_files=selected_files, interactive_confirm_save=is_interactive)
 
 def menu_settings(cfg):
     while True:
         defaults = cfg.get_defaults()
-        # Sort keys for consistent display
-        keys = sorted(defaults.keys())
+        # Respect JSON order (Python 3.7+ preserves insertion order)
+        keys = list(defaults.keys())
+        
+        # Hide internal/managed keys
+        keys = [k for k in keys if k not in ['sources']]
         
         options = []
         for k in keys:
             val = defaults[k]
-            # Colorize: Key (Cyan), Value (White/Green)
+            # Colorize: Key (Cyan), Value (Green)
             disp = f"{Colors.CYAN}{k}{Colors.ENDC}: {Colors.GREEN}{val}{Colors.ENDC}"
             options.append((k, disp))
             
@@ -878,26 +904,52 @@ def menu_settings(cfg):
         
         print(f"\nEditing {Colors.BOLD}{key}{Colors.ENDC}")
         print(f"Current Value: {current_val}")
-        new_val = input("Enter New Value (Enter to cancel): ").strip()
         
-        if new_val:
-            # Type inference
-            if isinstance(current_val, bool):
-                 if new_val.lower() in ['true', '1', 'yes', 'y']: final_val = True
-                 elif new_val.lower() in ['false', '0', 'no', 'n']: final_val = False
-                 else: 
-                     print("Invalid boolean. Keeping current.")
-                     time.sleep(1)
-                     continue
-            elif isinstance(current_val, int):
-                if new_val.isdigit(): final_val = int(new_val)
-                else:
-                    print("Invalid integer. Keeping current.")
-                    time.sleep(1)
-                    continue
+        final_val = None
+        
+        # ComboBox Logic for specific keys
+        if key == 'port':
+            common_ports = [80, 443, 8080, 8443, 2052, 2053, 2082, 2083, 2086, 2087, 2095, 2096]
+            opts = [str(p) for p in common_ports]
+            opts.append("Custom")
+            p_idx = terminal_menu(opts, f"Select Port (Current: {current_val})")
+            if p_idx == -1: continue
+            if p_idx == len(opts) - 1: # Custom
+                val = input("Enter Custom Port: ").strip()
+                if val.isdigit(): final_val = int(val)
             else:
-                final_val = new_val
+                final_val = common_ports[p_idx]
                 
+        elif key == 'protocol':
+            protos = ['tcp', 'ws', 'grpc', 'kcp', 'quic', 'http', 'https', 'httpupgrade', 'splithttp', 'xhttp']
+            opts = protos
+            p_idx = terminal_menu(opts, f"Select Protocol (Current: {current_val})")
+            if p_idx != -1: final_val = protos[p_idx]
+            
+        elif key == 'ip_range_level':
+            levels = ['Short', 'Medium', 'Full']
+            l_idx = terminal_menu(levels, f"Select Range Level (Current: {current_val})")
+            if l_idx != -1: final_val = levels[l_idx]
+            
+        elif key == 'output_format':
+            formats = ['json', 'csv', 'txt']
+            f_idx = terminal_menu(formats, f"Select Output Format (Current: {current_val})")
+            if f_idx != -1: final_val = formats[f_idx]
+            
+        else:
+            # Standard Text Input
+            new_val = input("Enter New Value (Enter to cancel): ").strip()
+            if new_val:
+                # Type inference
+                if isinstance(current_val, bool):
+                     if new_val.lower() in ['true', '1', 'yes', 'y']: final_val = True
+                     elif new_val.lower() in ['false', '0', 'no', 'n']: final_val = False
+                elif isinstance(current_val, int):
+                    if new_val.isdigit(): final_val = int(new_val)
+                else:
+                    final_val = new_val
+
+        if final_val is not None:
             cfg.update_default(key, final_val)
             print("Updated.")
             time.sleep(0.5)
