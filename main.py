@@ -922,12 +922,13 @@ def menu_scan_ip_ranges(cfg, tester, generator):
     elif idx == 1:
         files = terminal_file_selector(INPUT_DIR)
         for f in files:
-            try:
-                with open(f, 'r') as fh:
-                    for line in fh:
-                        line = line.strip()
-                        if line: targets.append({'cidr': line, 'prefix': 'CustomFile'})
-            except: pass
+            # Use robust load_file which handles JSON/TXT/CSV/Regex
+            loaded_data = load_file(f) 
+            for entry in loaded_data:
+                # entry is {'ip': '...'}
+                # We need to adapt it to targets: {'cidr': ..., 'prefix': ...}
+                if 'ip' in entry:
+                    targets.append({'cidr': entry['ip'], 'prefix': 'CustomFile'})
 
     elif idx == 2: # Terminal Input
         inp = input("\nEnter IPs/CIDRs (comma separated): ")
