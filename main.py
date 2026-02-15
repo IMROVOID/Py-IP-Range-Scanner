@@ -33,10 +33,11 @@ def get_char():
         except:
             return ''
     else:
+        # Linux: Single char read for pause listener
         fd = sys.stdin.fileno()
         old_settings = termios.tcgetattr(fd)
         try:
-            tty.setraw(sys.stdin.fileno())
+            tty.setraw(fd)
             ch = sys.stdin.read(1)
         finally:
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
@@ -76,7 +77,7 @@ if os.name == 'nt':
 # --- Utils ---
 
 def clear_screen():
-    # Use ANSI escape sequences instead of os.system('clear') to fix Termux linker errors
+    # ANSI escape code to clear screen (works on Termux & Linux without spawning subshell)
     print("\033[H\033[J", end="")
 
 def get_key():
@@ -103,32 +104,55 @@ def get_key():
         
     else:
         # --- LINUX / TERMUX LOGIC ---
-        k1 = get_char()
-        
-        if k1 == '\x1b': 
-            # It is an escape sequence (Arrow keys send ESC + [ + A)
-            # We must wait slightly to see if more characters follow
-            dr, _, _ = select.select([sys.stdin], [], [], 0.05)
-            if dr:
-                k2 = get_char()
-                if k2 == '[':
-                    k3 = get_char()
-                    if k3 == 'A': return 'UP'
-                    if k3 == 'B': return 'DOWN'
-                    if k3 == 'C': return 'RIGHT'
-                    if k3 == 'D': return 'LEFT'
-                return 'ESC'
-            else:
-                return 'ESC'
-                
-        elif k1 == '\r': return 'ENTER'
-        elif k1 == '\n': return 'ENTER'
-        elif k1 == ' ':  return 'SPACE'
-        elif k1 == '\x7f': return 'BACKSPACE'
-        elif k1 == '\x08': return 'BACKSPACE'
-        elif k1 == '\x03': return 'CTRL_C'
-        
-        return k1
+        # We must enter raw mode ONCE to capture the full sequence (ESC [ A)
+        fd = sys.stdin.fileno()
+        old_settings = termios.tcgetattr(fd)
+        try:
+            tty.setraw(fd)
+            
+            # Read first byte directly from FD to avoid python buffering issues
+            ch_bytes = os.read(fd, 1)
+            if not ch_bytes: return None
+            ch = ch_bytes.decode('utf-8', errors='ignore')
+            
+            if ch == '\x1b':
+                # It's ESC. Check if a sequence follows immediately.
+                dr, _, _ = select.select([fd], [], [], 0.1)
+                if dr:
+                    # Sequence detected, read next byte
+                    seq1_bytes = os.read(fd, 1)
+                    seq1 = seq1_bytes.decode('utf-8', errors='ignore')
+                    
+                    if seq1 == '[': # CSI (Common Arrows)
+                        seq2_bytes = os.read(fd, 1)
+                        seq2 = seq2_bytes.decode('utf-8', errors='ignore')
+                        if seq2 == 'A': return 'UP'
+                        if seq2 == 'B': return 'DOWN'
+                        if seq2 == 'C': return 'RIGHT'
+                        if seq2 == 'D': return 'LEFT'
+                    
+                    elif seq1 == 'O': # SS3 (Application Cursor Keys)
+                        seq2_bytes = os.read(fd, 1)
+                        seq2 = seq2_bytes.decode('utf-8', errors='ignore')
+                        if seq2 == 'A': return 'UP'
+                        if seq2 == 'B': return 'DOWN'
+                        if seq2 == 'C': return 'RIGHT'
+                        if seq2 == 'D': return 'LEFT'
+                        
+                    return 'ESC' # Captured sequence but unknown
+                else:
+                    return 'ESC' # Genuine ESC key
+            
+            elif ch == '\r' or ch == '\n': return 'ENTER'
+            elif ch == ' ': return 'SPACE'
+            elif ch == '\x7f' or ch == '\x08': return 'BACKSPACE'
+            elif ch == '\x03': return 'CTRL_C'
+            
+            return ch
+            
+        finally:
+            # Always restore settings
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 
 def terminal_file_selector(base_dir=".", extensions=None):
     current_dir = os.path.abspath(base_dir)
