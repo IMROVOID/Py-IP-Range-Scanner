@@ -11,8 +11,48 @@ import threading
 import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
-import msvcrt
 import re
+
+# --- Cross-Platform Input Handling ---
+# This block replaces the direct import of msvcrt
+
+if os.name == 'nt':
+    try:
+        import msvcrt
+    except ImportError:
+        pass # Should not happen on Windows
+else:
+    import tty
+    import termios
+    import select
+
+def get_char():
+    """Reads a single character from input (blocking). Returns string."""
+    if os.name == 'nt':
+        # Windows
+        try:
+            return msvcrt.getch().decode('utf-8', errors='ignore')
+        except:
+            return ''
+    else:
+        # Linux / Termux
+        fd = sys.stdin.fileno()
+        old_settings = termios.tcgetattr(fd)
+        try:
+            tty.setraw(sys.stdin.fileno())
+            ch = sys.stdin.read(1)
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+        return ch
+
+def kb_hit():
+    """Returns True if a key is waiting to be read (non-blocking)."""
+    if os.name == 'nt':
+        return msvcrt.kbhit()
+    else:
+        # Linux: Check if data is available on stdin
+        dr, dw, de = select.select([sys.stdin], [], [], 0)
+        return dr != []
 
 # --- Colors ---
 class Colors:
@@ -35,7 +75,8 @@ OUTPUT_FINAL_DIR = os.path.join("Output", "Final")
 CHECKPOINTS_DIR = "Checkpoints"
 
 # Enable VT100 for Windows 10/11
-os.system('color')
+if os.name == 'nt':
+    os.system('color')
 
 # --- Utils ---
 
@@ -43,21 +84,54 @@ def clear_screen():
     os.system('cls' if os.name == 'nt' else 'clear')
 
 def get_key():
-    """Reads a key press and returns a unified key code."""
-    key = msvcrt.getch()
-    if key in (b'\x00', b'\xe0'):
-        # Arrow keys or special function keys
+    """Reads a key press and returns a unified key code (UP, DOWN, ENTER, etc)."""
+    
+    if os.name == 'nt':
+        # --- WINDOWS LOGIC ---
         key = msvcrt.getch()
-        if key == b'H': return 'UP'
-        if key == b'P': return 'DOWN'
-        if key == b'M': return 'RIGHT'
-        if key == b'K': return 'LEFT'
-    elif key == b'\r': return 'ENTER'
-    elif key == b' ': return 'SPACE'
-    elif key == b'\x08': return 'BACKSPACE'
-    elif key == b'\x03': return 'CTRL_C'
-    elif key == b'\x1b': return 'ESC'
-    return None
+        if key in (b'\x00', b'\xe0'):
+            # Arrow keys or special function keys
+            try:
+                key = msvcrt.getch()
+                if key == b'H': return 'UP'
+                if key == b'P': return 'DOWN'
+                if key == b'M': return 'RIGHT'
+                if key == b'K': return 'LEFT'
+            except: pass
+        elif key == b'\r': return 'ENTER'
+        elif key == b' ': return 'SPACE'
+        elif key == b'\x08': return 'BACKSPACE'
+        elif key == b'\x03': return 'CTRL_C'
+        elif key == b'\x1b': return 'ESC'
+        # Return character if standard
+        try: return key.decode()
+        except: return None
+        
+    else:
+        # --- LINUX / TERMUX LOGIC ---
+        k1 = get_char()
+        
+        if k1 == '\x1b': # ESC or ANSI sequence start
+            # Check if there are more characters immediately following (Escape Sequence)
+            if kb_hit():
+                k2 = get_char()
+                if k2 == '[':
+                    k3 = get_char()
+                    if k3 == 'A': return 'UP'
+                    if k3 == 'B': return 'DOWN'
+                    if k3 == 'C': return 'RIGHT'
+                    if k3 == 'D': return 'LEFT'
+                return 'ESC' # Captured ESC sequence but didn't match arrows
+            else:
+                return 'ESC' # Just the ESC key
+        elif k1 == '\r': return 'ENTER'
+        elif k1 == '\n': return 'ENTER'
+        elif k1 == ' ':  return 'SPACE'
+        elif k1 == '\x7f': return 'BACKSPACE' # Common backspace on Linux
+        elif k1 == '\x08': return 'BACKSPACE' # Alternative backspace
+        elif k1 == '\x03': return 'CTRL_C'
+        
+        return k1
 
 def terminal_file_selector(base_dir=".", extensions=None):
     """
@@ -581,13 +655,14 @@ class IPTester:
                      time.sleep(0.5) # Yield control to pause menu in main thread
                      continue
                      
-                if msvcrt.kbhit():
+                if kb_hit():
                     try:
-                        key = msvcrt.getch().lower()
-                        if key == b'p': 
+                        # Use get_char which is cross-platform now (returns string)
+                        key = get_char().lower()
+                        if key == 'p': 
                             state.paused = True
-                        elif key == b's': state.stop_save()
-                        elif key == b'q': state.stop_no_save()
+                        elif key == 's': state.stop_save()
+                        elif key == 'q': state.stop_no_save()
                     except: pass
                 time.sleep(0.1)
                 
