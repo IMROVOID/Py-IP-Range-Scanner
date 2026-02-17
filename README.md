@@ -86,9 +86,19 @@ This project leverages standard Python libraries and a few key packages for opti
 
 ---
 
-## 📜 License & Copyright
+## 📜 License
 
-This project is completely open source and available to the public. You are free to use, modify, distribute, and fork this software for any purpose. No attribution is required, but it is appreciated.
+This project is licensed under the **GNU General Public License v3.0 (GPL-3.0)**.
+
+> This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
+
+**Key Requirements of GPL-3.0:**
+*   **Disclose Source:** You must make the source code available when you distribute the software.
+*   **License and Copyright Notice:** You must include a copy of the license and the original copyright notice.
+*   **Same License:** If you modify the code or use it as a library, your project must also be licensed under GPL-3.0 (Copyleft).
+*   **No Warranty:** This software is provided "as is" without any warranty of any kind.
+
+For more details, please see the [LICENSE](LICENSE) file in this repository.
 
 ---
 
