@@ -88,17 +88,23 @@ This project leverages standard Python libraries and a few key packages for opti
 
 ## 📜 License
 
-This project is licensed under the **GNU General Public License v3.0 (GPL-3.0)**.
+This project is open-source and licensed under the **[GNU General Public License v3.0 (GPL-3.0)](https://choosealicense.com/licenses/gpl-3.0/)**.
+
+### Summary of Key Requirements
+
+The GPL-3.0 is a strong copyleft license that ensures the software remains free. If you use, modify, or distribute this code, you must adhere to the following:
+
+* **Disclose Source:** You must make the source code available when you distribute the software.
+* **License & Copyright Notice:** You must include a copy of the license and the original author's copyright notice.
+* **Same License (Copyleft):** Any modifications or derived works must also be licensed under GPL-3.0.
+* **State Changes:** You must clearly indicate if you have modified the original files.
+* **No Warranty:** This software is provided "as is" without any warranty of any kind.
 
 > This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
+>
+> This program is distributed in the hope that it will be useful, but **WITHOUT ANY WARRANTY**; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
-**Key Requirements of GPL-3.0:**
-*   **Disclose Source:** You must make the source code available when you distribute the software.
-*   **License and Copyright Notice:** You must include a copy of the license and the original copyright notice.
-*   **Same License:** If you modify the code or use it as a library, your project must also be licensed under GPL-3.0 (Copyleft).
-*   **No Warranty:** This software is provided "as is" without any warranty of any kind.
-
-For more details, please see the [LICENSE](LICENSE) file in this repository.
+For full details, please refer to the [LICENSE](/LICENSE) file in this repository.
 
 ---
 
