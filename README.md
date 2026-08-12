@@ -105,27 +105,3 @@ The GPL-3.0 is a strong copyleft license that ensures the software remains free.
 > This program is distributed in the hope that it will be useful, but **WITHOUT ANY WARRANTY**; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 For full details, please refer to the [LICENSE](/LICENSE) file in this repository.
-
----
-
-## © About the Developer
-
-This application was developed and is maintained by **Roham Andarzgou**.
-
-I'm a passionate professional from Iran specializing in Graphic Design, Web Development, and cross-platform app development with Dart & Flutter. I thrive on turning innovative ideas into reality, whether it's a stunning visual, a responsive website, or a polished desktop app like this one. I also develop immersive games using Unreal Engine.
-
-* **Website:** [rovoid.ir](https://rovoid.ir)
-* **GitHub:** [IMROVOID](https://github.com/IMROVOID)
-* **LinkedIn:** [Roham Andarzgou](https://www.linkedin.com/in/roham-andarzgouu)
-
-### 🙏 Support This Project
-
-If you find this application useful, please consider a donation. As I am based in Iran, cryptocurrency is the only way I can receive support. Thank you!
-
-| Cryptocurrency | Address |
-| :--- | :--- |
-| **Bitcoin** (BTC) | `bc1qd35yqx3xt28dy6fd87xzd62cj7ch35p68ep3p8` |
-| **Ethereum** (ETH) | `0xA39Dfd80309e881cF1464dDb00cF0a17bF0322e3` |
-| **USDT** (TRC20) | `THMe6FdXkA2Pw45yKaXBHRnkX3fjyKCzfy` |
-| **Solana** (SOL) | `9QZHMTN4Pu6BCxiN2yABEcR3P4sXtBjkog9GXNxWbav1` |
-| **TON** | `UQCp0OawnofpZTNZk-69wlqIx_wQpzKBgDpxY2JK5iynh3mC` |
